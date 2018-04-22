@@ -54,7 +54,7 @@ class Regularization_block(object):
 
 			# omit bn and relu!
 			# output: batch x disp x height x width x 1
-			out = tf.layers.conv3d_transpose(conv[-1], filters=1, kernel_size=3, strides=2, 
+			out = tf.layers.conv3d_transpose(conv[-1], filters=1, kernel_size=3, strides=(1,2,2), 
 				name='upsample_final', padding="same", reuse=tf.AUTO_REUSE)
 		
 		return(out)
