@@ -10,7 +10,7 @@ def Conv2d(layer_name, input, filters=32, kernel_size=3, strides=1, trainable=Tr
 	out = tf.layers.conv2d( input , filters=filters, kernel_size=[kernel_size,kernel_size], strides=strides, 
 		name=layer_name, padding="same", reuse=tf.AUTO_REUSE, trainable=trainable )
 	out = tf.layers.batch_normalization(out, name=layer_name+'_batchnorm')
-	outf = tf.nn.relu(out, name=layer_name+'_relu')
+	outf = tf.nn.elu(out, name=layer_name+'_elu')
 	return( outf )
 
 
@@ -18,7 +18,7 @@ def Conv3d(layer_name, input, filters=32, kernel_size=3, strides=1, trainable=Tr
 	out = tf.layers.conv3d( input , filters=filters, kernel_size=kernel_size, strides=strides, 
 		name=layer_name, padding="same", reuse=tf.AUTO_REUSE, trainable=trainable )
 	out = tf.layers.batch_normalization(out, name=layer_name+'_batchnorm')
-	outf = tf.nn.relu(out, name=layer_name+'_relu')
+	outf = tf.nn.elu(out, name=layer_name+'_elu')
 	return( outf )
 
 
@@ -42,11 +42,11 @@ def Upsample_block(scope_name, input, residual, filters=32):
 		out = tf.layers.conv3d_transpose( input , filters=filters, kernel_size=3, strides=2, 
 			name='deconv1', padding="same", reuse=tf.AUTO_REUSE )
 		out = tf.layers.batch_normalization(out, name='batchnorm')
-		outf = tf.nn.relu(out, name='relu')
+		outf = tf.nn.elu(out, name='elu')
 	return( outf+residual )
 
 
-def Residual_block(scope_name, input    ):
+def Residual_block(scope_name, input ):
 
 	with tf.variable_scope(scope_name, reuse=tf.AUTO_REUSE) as scope:
 		out1 = Conv2d('conv1', input) 
@@ -117,7 +117,20 @@ def loss(logits, labels, max_disp):
 	mask = tf.cast( tf.logical_and(labels > 0, labels < max_disp) , dtype=tf.bool)
 	diff = tf.abs( labels - logits)
 	diff = tf.where(mask, diff, tf.zeros_like(labels))
-	loss_mean = tf.reduce_sum(diff) / tf.reduce_sum( tf.cast(mask, tf.float32) )
+	loss_mean = tf.reduce_sum(diff) / tf.reduce_sum( tf.cast(mask, tf.float32) ) 
+	vars_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+	weights_list = [v for v in vars_list if 'kernel' in v.name]
+	regularization_loss = sum([tf.nn.l2_loss(w) for w in weights_list])
+	beta = 0.002
+	return(loss_mean + beta * regularization_loss)
+
+
+def loss_unregularized(logits, labels, max_disp):
+	# both logits and labels have dimensions of channels x height x width
+	mask = tf.cast( tf.logical_and(labels > 0, labels < max_disp) , dtype=tf.bool)
+	diff = tf.abs( labels - logits)
+	diff = tf.where(mask, diff, tf.zeros_like(labels))
+	loss_mean = tf.reduce_sum(diff) / tf.reduce_sum( tf.cast(mask, tf.float32) ) 
 	return(loss_mean)
 
 
@@ -133,6 +146,16 @@ def get_batch(id, batch_size, filelist):
 	disp_dir='train/out_disp_occ'
 
 	# filelist = get_filelist(left_dir)
+	def center_img(img):
+		img = img.astype(np.float32)
+		var = np.var(img, axis = (0,1), keepdims = True)
+		mean = np.mean(img, axis = (0,1), keepdims = True)
+		return (img - mean) / np.sqrt(var)
+
+	def norm_img(img, new_max, new_min, old_max, old_min):
+		img = img.astype(np.float32)
+		return (img - old_min) * (new_max - new_min) / (old_max - old_min) + new_min
+ 
 
 	ids = [ (id*batch_size + x)%len(filelist) for x in range(batch_size) ]
 	
@@ -142,16 +165,11 @@ def get_batch(id, batch_size, filelist):
 	map_batch = [None]*batch_size
 
 	for x in xrange(0,batch_size):
-		left_batch[x] = 1.0*cv2.imread( left_dir+'/'+ filelist[ids[x]] , -1)[np.newaxis, :, : ,:]
-		right_batch[x] = 1.0*cv2.imread( right_dir+'/'+ filelist[ids[x]], -1)[np.newaxis, :, : ,:]
+		left_batch[x] = center_img( cv2.imread( left_dir+'/'+ filelist[ids[x]] , -1))[np.newaxis, :, : ,:]
+		right_batch[x] = center_img( cv2.imread( right_dir+'/'+ filelist[ids[x]], -1))[np.newaxis, :, : ,:]
 		
 		y = cv2.imread( disp_dir+'/'+ filelist[ids[x]] , -1)[np.newaxis, :, :]
-
-		disp_batch[x] = (1.0*y.copy())/256.0
+		# y[y<256] = 0
+		disp_batch[x] = y/256.0
 		
-		y[y>0] = 1
-		# map_batch
-		map_batch[x] = y
-		# map_batch[x] = 1.0*y
-		# map_batch[x] = y>0
 	return( np.concatenate(left_batch,0), np.concatenate(right_batch,0), np.concatenate(disp_batch,0) )

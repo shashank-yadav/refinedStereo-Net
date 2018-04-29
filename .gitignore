@@ -1,5 +1,6 @@
 model.pyc
 ops.pyc
-logs
-checkpoints
+logs*
+checkpoints*
+ckpts*
 train
