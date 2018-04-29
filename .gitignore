@@ -1,5 +1,4 @@
-model.pyc
-ops.pyc
+*.pyc
 logs*
 checkpoints*
 ckpts*
